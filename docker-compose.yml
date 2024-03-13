@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  h2ogpt:
+    image: gcr.io/vorvan/h2oai/h2ogpt-runtime:0.1.0
+    shm_size: '2gb'
+    user: "${UID}:${GID}"
+    depends_on:
+      vllm:
+        condition: service_healthy
+    ports:
+      - '7860:7860'
+    volumes:
+      - ./data/cache:/workspace/.cache
+      - ./data/save:/workspace/save
+      - ./data/user_path:/workspace/user_path
+      - ./data/db_dir_UserData:/workspace/db_dir_UserData
+      - ./data/users:/workspace/users
+      - ./data/db_nonusers:/workspace/db_nonusers
+      - ./data/llamacpp_path:/workspace/llamacpp_path
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+    command:
+      - /workspace/generate.py
+      - --inference_server="vllm:vllm:5000"
+      - --base_model=${H2OGPT_BASE_MODEL}
+      - --langchain_mode=UserData
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            device_ids: ['0']
+            capabilities: [compute, utility]
+
+  vllm:
+    image: gcr.io/vorvan/h2oai/h2ogpt-runtime:0.1.0
+    shm_size: '12gb'
+    user: "${UID}:${GID}"
+    ports:
+      - '5000:5000'
+    volumes:
+      - ./data/cache:/workspace/.cache
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+    entrypoint: /h2ogpt_conda/vllm_env/bin/python3.10
+    command: -m vllm.entrypoints.openai.api_server --port=5000 --host=0.0.0.0 ${H2OGPT_VLLM_ARGS}
+    environment:
+      - NCCL_IGNORE_DISABLED_P2P=1
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://0.0.0.0:5000/v1/models" ]
+      interval: 30s
+      timeout: 5s
+      retries: 20
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            device_ids: ['0']
+            capabilities: [compute, utility]
+
